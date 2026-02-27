@@ -1,0 +1,49 @@
+name: Deploy Cosmix to AWS
+
+on:
+  push:
+    branches:
+      - main # Triggers the deployment when you push to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. GitHub downloads your code to its temporary runner
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Securely copies all your files straight to your AWS server
+      - name: Copy files to AWS EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "."
+          target: "/var/www/html/cosmix"
+
+      # 3. Logs into AWS and runs the Docker & Laravel commands
+      - name: Rebuild Docker Containers
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /var/www/html/cosmix
+            
+            # Ensures an .env file exists so Docker doesn't crash on first run
+            if [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+            
+            # Rebuild and start the containers using our production file
+            docker compose -f docker-compose.prod.yml up --build -d
+            
+            # Clear caches (This completely fixes the InvalidSignatureException!)
+            docker compose -f docker-compose.prod.yml exec -T app php artisan optimize:clear
+            
+            # Run database migrations
+            docker compose -f docker-compose.prod.yml exec -T app php artisan migrate --force
